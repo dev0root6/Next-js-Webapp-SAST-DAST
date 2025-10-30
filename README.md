@@ -1,7 +1,3 @@
-# Captcha finder (Educational Demo)
-
-This is a minimal Next.js app that implements a tiny CAPTCHA-based game and an in-memory leaderboard. It intentionally contains weaknesses for learning purposes:
-
 - An XSS vector: user-provided player names are rendered into the leaderboard using `dangerouslySetInnerHTML` without sanitization.
 - Weak server-side validation: the API accepts any submitted score without authoritative checks.
 
