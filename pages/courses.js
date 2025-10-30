@@ -84,12 +84,19 @@ export default function Courses() {
               <button type="submit" className="btn">Search</button>
             </form>
             
-            {/* INTENTIONAL XSS: Reflecting user input without sanitization */}
+            {/* INTENTIONAL XSS: Reflecting user input without sanitization
+               This deliberately uses dangerouslySetInnerHTML with children so scanners/lints should flag it. */}
             {lastSearch && (
               <div className="search-summary">
-                 <div dangerouslySetInnerHTML={{ __html: "HTML" }}>
+                <div
+                  dangerouslySetInnerHTML={{ __html: lastSearch }}
+                >
+                  {/* Intentional child content to trigger the "don't use children with dangerouslySetInnerHTML" rule */}
+                  <span>Children (intentional vuln)</span>
+                </div>
               </div>
             )}
+
           </div>
 
           <div className="courses-grid">
