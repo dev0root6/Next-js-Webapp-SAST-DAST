@@ -87,7 +87,7 @@ export default function Courses() {
             {/* INTENTIONAL XSS: Reflecting user input without sanitization */}
             {lastSearch && (
               <div className="search-summary">
-                Showing results for: <span dangerouslySetInnerHTML={{ __html: lastSearch }} />
+                 <div dangerouslySetInnerHTML={{ __html: "HTML" }}>
               </div>
             )}
           </div>
