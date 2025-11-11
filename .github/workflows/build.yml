@@ -1,27 +1,110 @@
-name: Build
+name: Build & SonarQube Report
 
 on:
   push:
     branches:
       - main
 
-
 jobs:
   build:
-    name: Build and analyze
+    name: Build and Analyze
     runs-on: ubuntu-latest
-    
+
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      PROJECT_KEY: ship-ee-updates   # update this if your Sonar project key differs
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      - uses: SonarSource/sonarqube-scan-action@v6
+          fetch-depth: 0
+
+      - name: Run SonarQube Analysis
+        id: sonar
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-      # If you wish to fail your job when the Quality Gate is red, uncomment the
-      # following lines. This would typically be used to fail a deployment.
-      # - uses: SonarSource/sonarqube-quality-gate-action@v1
-      #   timeout-minutes: 5
-      #   env:
-      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
+
+      - name: Wait before fetching report
+        run: sleep 10
+
+      - name: Fetch SonarQube Project Status
+        id: sonar_api
+        run: |
+          echo "Fetching project status from SonarQube API..."
+          response=$(curl -s -w "%{http_code}" -u "${{ env.SONAR_TOKEN }}:" \
+            "${{ env.SONAR_HOST_URL }}/api/qualitygates/project_status?projectKey=${{ env.PROJECT_KEY }}" \
+            -o sonar_response.json)
+
+          if [ "$response" -ne 200 ]; then
+            echo "SonarQube API call failed with status $response"
+            echo "error=API_FAILED" >> $GITHUB_ENV
+          else
+            echo "SonarQube API call successful"
+            echo "error=NONE" >> $GITHUB_ENV
+          fi
+
+      - name: Parse and Send Discord Notification
+        if: always()
+        run: |
+          build_status=${{ job.status }}
+          error_type=${{ env.error }}
+
+          if [ "$build_status" == "success" ] && [ "$error_type" == "NONE" ]; then
+            quality_status=$(jq -r '.projectStatus.status' sonar_response.json)
+            bugs=$(curl -s -u "${{ env.SONAR_TOKEN }}:" \
+              "${{ env.SONAR_HOST_URL }}/api/issues/search?componentKeys=${{ env.PROJECT_KEY }}&types=BUG" | jq '.total')
+            smells=$(curl -s -u "${{ env.SONAR_TOKEN }}:" \
+              "${{ env.SONAR_HOST_URL }}/api/issues/search?componentKeys=${{ env.PROJECT_KEY }}&types=CODE_SMELL" | jq '.total')
+            hotspots=$(curl -s -u "${{ env.SONAR_TOKEN }}:" \
+              "${{ env.SONAR_HOST_URL }}/api/hotspots/search?projectKey=${{ env.PROJECT_KEY }}" | jq '.paging.total')
+
+            payload=$(jq -n --arg status "$quality_status" \
+              --arg bugs "$bugs" --arg smells "$smells" --arg hotspots "$hotspots" \
+              --arg url "${{ env.SONAR_HOST_URL }}/dashboard?id=${{ env.PROJECT_KEY }}" \
+              '{
+                "username": "GitHub CI Bot",
+                "embeds": [{
+                  "title": "✅ Build Successful & SonarQube Report",
+                  "color": 5763719,
+                  "fields": [
+                    {"name": "Quality Gate", "value": $status, "inline": true},
+                    {"name": "Bugs", "value": $bugs, "inline": true},
+                    {"name": "Code Smells", "value": $smells, "inline": true},
+                    {"name": "Security Hotspots", "value": $hotspots, "inline": true},
+                    {"name": "Dashboard", "value": $url, "inline": false}
+                  ]
+                }]
+              }')
+
+          else
+            # Handle failure cases
+            if [ "$error_type" == "API_FAILED" ]; then
+              reason="❌ SonarQube API call failed — possibly invalid token, expired token, or wrong URL."
+            elif [ "$build_status" != "success" ]; then
+              reason="❌ Build failed — check GitHub Actions logs for details."
+            else
+              reason="⚠️ Unknown error occurred during SonarQube fetch."
+            fi
+
+            payload=$(jq -n --arg reason "$reason" \
+              '{
+                "username": "GitHub CI Bot",
+                "embeds": [{
+                  "title": "🚨 Build or Analysis Failed",
+                  "color": 15548997,
+                  "fields": [
+                    {"name": "Reason", "value": $reason, "inline": false}
+                  ]
+                }]
+              }')
+          fi
+
+          curl -H "Content-Type: application/json" \
+               -X POST \
+               -d "$payload" \
+               "${{ env.DISCORD_WEBHOOK }}"
