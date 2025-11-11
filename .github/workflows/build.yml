@@ -14,7 +14,7 @@ jobs:
       DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
       SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-      PROJECT_KEY: ship-ee-updates   # update this if your Sonar project key differs
+      PROJECT_KEY: mastersolis-bug-report
 
     steps:
       - name: Checkout Repository
